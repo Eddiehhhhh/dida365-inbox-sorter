@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-滴答清单收集箱整理 - GitHub Actions 版本
+滴答清单收集箱整理 - 修复版
 每小时运行：只处理有截止日期的任务
+使用正确的方法：创建新任务 + 删除原任务
 """
 
 import requests
@@ -16,7 +17,7 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
-# 清单ID映射（基于Eddie的历史分类习惯）
+# 清单ID映射
 PROJECT_MAP = {
     "濠联": "5e4cfef0c7edd11da9d5d956",
     "产品AI": "6825ab4ef12d11b11d7a4438",
@@ -71,19 +72,31 @@ def get_inbox_tasks():
         return response.json()
     return None
 
-def move_task(task_id, target_project_id, task_title):
-    """移动任务到目标清单"""
-    url = f"{API_BASE}/open/v1/project/inbox/task/{task_id}"
-    response = requests.get(url, headers=HEADERS)
-    if response.status_code != 200:
+def move_task(task_id, target_project_id, task):
+    """移动任务：创建新任务 + 删除原任务"""
+    # 构建新任务数据
+    new_task = {
+        "title": task.get("title"),
+        "content": task.get("content", ""),
+        "desc": task.get("desc", ""),
+        "dueDate": task.get("dueDate"),
+        "startDate": task.get("startDate"),
+        "isAllDay": task.get("isAllDay", True),
+        "priority": task.get("priority", 1),
+        "timezone": task.get("timezone", "Asia/Shanghai"),
+        "projectId": target_project_id,
+    }
+    
+    # 在目标清单创建新任务
+    create_url = f"{API_BASE}/open/v1/task"
+    result = requests.post(create_url, headers=HEADERS, json=new_task)
+    if result.status_code != 200:
         return False
     
-    task = response.json()
-    task["projectId"] = target_project_id
-    
-    update_url = f"{API_BASE}/open/v1/task/{task_id}"
-    response = requests.post(update_url, headers=HEADERS, json=task)
-    return response.status_code == 200
+    # 删除原任务
+    delete_url = f"{API_BASE}/open/v1/project/inbox/task/{task_id}"
+    del_result = requests.delete(delete_url, headers=HEADERS)
+    return del_result.status_code == 200
 
 def suggest_project(task_title):
     """根据任务标题建议目标清单"""
@@ -125,7 +138,7 @@ def main():
         
         if suggested and suggested in PROJECT_MAP:
             project_id = PROJECT_MAP[suggested]
-            success = move_task(task_id, project_id, task_title)
+            success = move_task(task_id, project_id, task)
             
             if success:
                 results["success"].append({
@@ -147,7 +160,7 @@ def main():
     
     # 输出结果
     print(json.dumps({
-        "message": f"处理完成：{len(results['success'])}个移动成功，{len(results['skipped'])}个跳过",
+        "message": f"处理完成：{len(results['success'])}个移动成功，{len(results['skipped'])}个跳过，{len(results['failed'])}个失败",
         "results": results
     }, ensure_ascii=False, indent=2))
 
